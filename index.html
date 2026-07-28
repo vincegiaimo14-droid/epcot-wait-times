@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EPCOT Wait Time Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+    color: #1a1a1a;
+    background: #fafafa;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: #666; margin-top: 0; margin-bottom: 30px; }
+  .card {
+    background: white;
+    border: 1px solid #e2e2e2;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+  .recommendation {
+    background: #eef7ee;
+    border: 1px solid #bfe3bf;
+  }
+  .recommendation h2 { margin-top: 0; color: #256029; font-size: 1.1rem; }
+  .stat-row { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; }
+  .stat { min-width: 140px; }
+  .stat .value { font-size: 1.6rem; font-weight: 600; }
+  .stat .label { font-size: 0.85rem; color: #666; }
+  #status { color: #888; font-size: 0.9rem; }
+  footer { color: #999; font-size: 0.8rem; margin-top: 30px; }
+  footer a { color: #999; }
+</style>
+</head>
+<body>
+
+<h1>EPCOT Wait Time Tracker</h1>
+<p class="subtitle">Tracking average ride wait times over time to find the best days to visit.</p>
+
+<p id="status">Loading data...</p>
+
+<div class="card recommendation" id="recommendation-card" style="display:none;">
+  <h2>Best time to visit</h2>
+  <p id="recommendation-text"></p>
+</div>
+
+<div class="card" id="chart-card" style="display:none;">
+  <canvas id="waitChart" height="100"></canvas>
+</div>
+
+<div class="card" id="dow-card" style="display:none;">
+  <h2 style="font-size:1.1rem; margin-top:0;">Average wait by day of week</h2>
+  <canvas id="dowChart" height="100"></canvas>
+</div>
+
+<footer>
+  Data source: <a href="https://queue-times.com" target="_blank">Powered by Queue-Times.com</a>.
+  This is a personal learning project and is not affiliated with Disney or Queue-Times.com.
+</footer>
+
+<script>
+async function main() {
+  const status = document.getElementById('status');
+  let records;
+  try {
+    const res = await fetch('data/epcot_waits.json?_=' + Date.now());
+    if (!res.ok) throw new Error('No data file yet');
+    records = await res.json();
+  } catch (e) {
+    status.textContent = 'No data yet. The tracker collects one data point per hour, so check back after the first scheduled run.';
+    return;
+  }
+
+  // Only keep records where we actually got a wait time
+  records = records.filter(r => r.average_wait_minutes !== null);
+
+  if (records.length === 0) {
+    status.textContent = 'Data file exists but has no readings yet. Check back soon.';
+    return;
+  }
+
+  status.style.display = 'none';
+
+  // ---- Overall chart: every data point over time ----
+  document.getElementById('chart-card').style.display = 'block';
+  const labels = records.map(r => r.timestamp_utc.slice(0, 16).replace('T', ' '));
+  const waits = records.map(r => r.average_wait_minutes);
+
+  new Chart(document.getElementById('waitChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Average wait (minutes)',
+        data: waits,
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37,99,235,0.1)',
+        tension: 0.3,
+        fill: true,
+        pointRadius: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { title: { display: true, text: 'EPCOT average wait time over time' } },
+      scales: { x: { ticks: { maxTicksLimit: 8 } } }
+    }
+  });
+
+  // ---- Group by day of week ----
+  const byDay = {};
+  for (const r of records) {
+    if (!byDay[r.day_of_week]) byDay[r.day_of_week] = [];
+    byDay[r.day_of_week].push(r.average_wait_minutes);
+  }
+
+  const dayOrder = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const dayAverages = dayOrder
+    .filter(d => byDay[d])
+    .map(d => ({
+      day: d,
+      avg: byDay[d].reduce((a,b) => a+b, 0) / byDay[d].length,
+      count: byDay[d].length
+    }));
+
+  if (dayAverages.length > 0) {
+    document.getElementById('dow-card').style.display = 'block';
+    new Chart(document.getElementById('dowChart'), {
+      type: 'bar',
+      data: {
+        labels: dayAverages.map(d => d.day),
+        datasets: [{
+          label: 'Average wait (minutes)',
+          data: dayAverages.map(d => Math.round(d.avg * 10) / 10),
+          backgroundColor: '#16a34a'
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } }
+      }
+    });
+  }
+
+  // ---- Recommendation logic ----
+  // Overall mean and standard deviation, used to flag anomalous weeks/days later
+  const mean = waits.reduce((a,b) => a+b, 0) / waits.length;
+  const variance = waits.reduce((a,b) => a + Math.pow(b - mean, 2), 0) / waits.length;
+  const stdDev = Math.sqrt(variance);
+
+  let recText = '';
+  if (dayAverages.length >= 3) {
+    const best = dayAverages.reduce((a,b) => a.avg < b.avg ? a : b);
+    const worst = dayAverages.reduce((a,b) => a.avg > b.avg ? a : b);
+    recText = `Based on ${records.length} readings so far, <strong>${best.day}</strong> ` +
+      `has the lowest average wait (${best.avg.toFixed(1)} min), while ` +
+      `<strong>${worst.day}</strong> tends to run highest (${worst.avg.toFixed(1)} min). ` +
+      `Overall average is ${mean.toFixed(1)} min, typically varying by about ${stdDev.toFixed(1)} min. ` +
+      `A reading more than ${(stdDev * 2).toFixed(0)} min above or below that average likely reflects ` +
+      `an unusual day (weather, a holiday, or an event) rather than the normal pattern.`;
+  } else {
+    recText = `Only ${records.length} reading(s) collected so far, spread across ${dayAverages.length} day(s) of the week. ` +
+      `Check back after a few weeks of automatic hourly collection for a reliable "best day" recommendation.`;
+  }
+
+  document.getElementById('recommendation-card').style.display = 'block';
+  document.getElementById('recommendation-text').innerHTML = recText;
+}
+
+main();
+</script>
+</body>
+</html>
