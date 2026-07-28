@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "timestamp_utc": "2026-07-28T18:28:36.199864+00:00",
+    "date": "2026-07-28",
+    "hour_utc": 18,
+    "day_of_week": "Tuesday",
+    "average_wait_minutes": 19.7,
+    "rides_open": 19,
+    "rides_closed": 2
+  }
+]
