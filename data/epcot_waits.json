@@ -6001,5 +6001,14 @@
     "average_wait_minutes": 18.2,
     "rides_open": 17,
     "rides_closed": 4
+  },
+  {
+    "timestamp_utc": "2026-11-22T07:48:47.589367+00:00",
+    "date": "2026-11-22",
+    "hour_utc": 7,
+    "day_of_week": "Sunday",
+    "average_wait_minutes": null,
+    "rides_open": 0,
+    "rides_closed": 21
   }
 ]
